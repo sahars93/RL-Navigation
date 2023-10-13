@@ -3,7 +3,7 @@
 ## Installation
 
 
-Follow the Isaac Sim [documentation](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim/install_basic.html) to install the latest Isaac Sim release.
+Follow the Isaac Sim [documentation](https://github.com/NVIDIA-Omniverse/OmniIsaacGymEnvs) to install the latest Isaac Sim release.
 
 
 To install `omniisaacgymenvs`, first clone this repository:
