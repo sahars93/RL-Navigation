@@ -9,7 +9,7 @@ Follow the Isaac Sim [documentation](https://docs.omniverse.nvidia.com/app_isaac
 To install `omniisaacgymenvs`, first clone this repository:
 
 ```bash
-git clone https://github.com/sahars93/RL-omni.git
+git clone git@github.com:sahars93/RL-omni.git
 ```
 
 Set a `PYTHON_PATH` variable in the terminal that links to the python executable, 
