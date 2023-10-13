@@ -52,7 +52,7 @@ cd ~/catkin_ws && catkin_make
 Change the number of 2d lidar samples (to 21) and the min range (to 0.1) and the max range (to 1.0):
 
 ```bash
-udo nano /opt/ros/noetic/share/turtlebot3_description/urdf/turtlebot3_waffle.gazebo.xacro
+sudo nano /opt/ros/noetic/share/turtlebot3_description/urdf/turtlebot3_waffle.gazebo.xacro
 ```
 
 Launch the TurtleBot3 World
