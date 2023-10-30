@@ -19,9 +19,9 @@ class JetbotNode:
         self.base_cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=20)
         self.target_pub = rospy.Publisher("/target", PointStamped, queue_size=20)
 
-        self.ort_model = ort.InferenceSession("onnx_models/jetbot_2.onnx")
+        self.ort_model = ort.InferenceSession("onnx_models/final360.onnx")
         self.base_control = True
-        self.lidar_samples = 20
+        self.lidar_samples = 360
 
         # self.target_pos = np.array([-0.5, -1.8, 0.0])
         self.target_pos = np.array([0.5, 0.5, 0.0])
@@ -35,7 +35,7 @@ class JetbotNode:
         self.base_yaw = None        
 
 
-        rospy.Timer(rospy.Duration(1.0), self.send_control)
+        rospy.Timer(rospy.Duration(1/5.0), self.send_control)
         rospy.Timer(rospy.Duration(1/5.0), self.update_base_pose)
     
     
@@ -60,7 +60,7 @@ class JetbotNode:
         x2, y2 = self.base_position.x, self.base_position.y
         self.goal_distances = abs(math.sqrt((x2 - x1)**2 + (y2 - y1)**2))
 
-        if self.goal_distances < 0.22:
+        if self.goal_distances < 0.2:
             self.base_control = False
             print("Goal reached!", "distance:", self.goal_distances)
         self.publish_target()
@@ -95,7 +95,7 @@ class JetbotNode:
 
         observation = np.concatenate((range, angle, dist)).astype(np.float32)
         observation = observation.reshape((1,-1))
-        observation[observation == inf] = 1.0
+        observation[observation == inf] = 1.5
         outputs = self.ort_model.run(None, {"obs": observation})
         mu = outputs[0].squeeze()
         # print(f"value : {outputs[2]}")
@@ -104,7 +104,7 @@ class JetbotNode:
     
         # publish base actions as twist message, base_action[0] is the linear velocity, base_action[1] is the angular velocity
         twist = Twist()
-        twist.linear.x = base_action[0]* 0.05 # check the speeds, 0.2 is safe
+        twist.linear.x = abs(base_action[0])* 0.05 # check the speeds, 0.2 is safe
         twist.angular.z = base_action[1]* 0.15   # check the speeds, 0.1 is safe
         if self.base_control:
             self.base_cmd_vel_pub.publish(twist)

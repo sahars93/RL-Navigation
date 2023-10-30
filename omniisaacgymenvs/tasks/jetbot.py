@@ -1,28 +1,28 @@
-from fileinput import close
 from omniisaacgymenvs.tasks.base.rl_task import RLTask
-from omniisaacgymenvs.robots.controllers.differential_controller import DifferentialController
 from omniisaacgymenvs.robots.articulations.jetbot import Jetbot
 from omni.isaac.core.articulations import ArticulationView
-from omni.isaac.core.prims import GeometryPrimView
+from omniisaacgymenvs.robots.controllers.differential_controller import DifferentialController
 from omni.isaac.core.utils.prims import get_prim_at_path
 from omni.isaac.core.utils.stage import add_reference_to_stage
-from omni.isaac.core.utils.types import ArticulationActions
-from omni.isaac.range_sensor import _range_sensor
 from omni.isaac.core.utils.rotations import quat_to_euler_angles
+from omni.isaac.core.objects import DynamicCuboid, DynamicSphere
+from omni.isaac.core.prims import RigidPrimView
+from omni.isaac.core.utils.extensions import enable_extension
+enable_extension("omni.isaac.range_sensor")
+from omni.isaac.range_sensor import _range_sensor
 import omni.kit.commands
+from gym import spaces
 from pxr import Gf
 from pathlib import Path
 import numpy as np
 import torch
-from omni.isaac.core.utils.torch.maths import torch_rand_float, tensor_clamp, unscale
 import math
-import omni.replicator.isaac as dr
-from omni.isaac.sensor import LidarRtx
-from gym import spaces
-from omni.isaac.core.objects import DynamicSphere, DynamicCuboid
-from omni.isaac.core.prims import RigidPrimView
-from omni.isaac.core.utils.render_product import create_hydra_texture
-import omni.replicator.core as rep
+import time
+from pxr import Gf, UsdPhysics, Usd, UsdGeom, PhysxSchema
+import omni.usd
+from omni.isaac.core.utils.stage import get_current_stage
+from omni.physxcommands import AddGroundPlaneCommand, SetRigidBodyCommand, SetStaticColliderCommand
+import cv2
 """
 TODO:
 - add variables like episode length and collision range to config
@@ -39,7 +39,7 @@ class JetbotTask(RLTask):
         env,
         offset=None
     ) -> None:
-
+       
         self._sim_config = sim_config
         self._cfg = sim_config.config
         self._task_cfg = sim_config.task_config
@@ -50,13 +50,17 @@ class JetbotTask(RLTask):
 
         self._reset_dist = self._task_cfg["env"]["resetDist"]
         self._max_push_effort = self._task_cfg["env"]["maxEffort"]
-        self._max_episode_length = 500
+        self._max_episode_length = 1000
         
-        self.collision_range = 0.15 # 0.11 or 0.20
+        self.collision_range = 0.30 # 0.11 or 0.20
 
-        self.ranges_count = 20
+        self.ranges_count = 360
         self._num_observations = self.ranges_count + 2 # +2 for angle and distance (polar coords)
         self._num_actions = 2
+
+        self.x_vel = 0.25
+        self.y_vel = 0.7
+        self.z_ang = 10
 
         self._diff_controller = DifferentialController(name="simple_control",wheel_radius=0.0325, wheel_base=0.1125)
 
@@ -67,22 +71,37 @@ class JetbotTask(RLTask):
         # init tensors that need to be set to correct device
         self.prev_goal_distance = torch.zeros(self._num_envs).to(self._device)
         self.prev_heading = torch.zeros(self._num_envs).to(self._device)
-        self.target_position = torch.tensor([1.5, -1.5, 0.0]).to(self._device)
-        self.obstacle_position = torch.tensor([1.4, 0, 0.05]).to(self._device)
+        # self.target_position = torch.tensor([3.4, 3.6, 0.0]).to(self._device)
+        # self.target_position = torch.tensor([2, -3.6, 0.0]).to(self._device)
+        self.target_position = torch.tensor([-3.1, 0, 0.0]).to(self._device)
+        # self.target_position = torch.tensor([0, -3.4, 0.0]).to(self._device)
+        # self.target_position = torch.tensor([-2.3, 3.4, 0.0]).to(self._device)
+        # self.obstacle_position = torch.tensor([1.4, 0, 0.05]).to(self._device)
+        self.obstacle_pose = Gf.Vec3f(2.7, -1.5, 0.05)
+        self.obstacle1_pose = Gf.Vec3f(1.4, 4.1, 0.05)
+        self.obstacle2_pose = Gf.Vec3f(0, -1.4, 0.05)
+        self.obstacle_size = Gf.Vec3f(.1, .4, .2)
+        self.obstacle_color = Gf.Vec3f(1, 0, 0)
+        self.obstacle_ori = Gf.Quatf(0.95, 0, 0, -0.31)
 
         return
 
     def set_up_scene(self, scene) -> None:
+        self._stage = omni.usd.get_context().get_stage()
         self.get_jetbot()
         self.add_target()
-        self.add_obstacle()
+        # self.add_obstacle()
         self.get_home()
         RLTask.set_up_scene(self, scene)
         self._home = ArticulationView(prim_paths_expr="/World/envs/.*/Home/home", name="home_view")
         self._jetbots = ArticulationView(prim_paths_expr="/World/envs/.*/Jetbot/jetbot", name="jetbot_view")
         self._targets = RigidPrimView(prim_paths_expr="/World/envs/.*/Target/target", name="targets_view")
-        self._obstacles = RigidPrimView(prim_paths_expr="/World/envs/.*/Obstacle/obstacle", name="obstacles_view")
+        # self._obstacles = RigidPrimView(prim_paths_expr="/World/envs/.*/Obstacle/obstacle", name="obstacles_view")
+        # self._obstacles1 = RigidPrimView(prim_paths_expr="/World/envs/.*/Obstacle1/obstacle1", name="obstacles1_view")
+        # self._obstacles2 = RigidPrimView(prim_paths_expr="/World/envs/.*/Obstacle2/obstacle2", name="obstacles2_view")
+        
         self._targets._non_root_link = True
+        # self._obstacles._non_root_link = True
         scene.add(self._jetbots)
         scene.add(self._targets)
         # scene.add(self._obstacles)
@@ -96,8 +115,8 @@ class JetbotTask(RLTask):
             "RangeSensorCreateLidar",
             path=self.default_zero_env_path + "/Jetbot/jetbot/chassis/Lidar/Lidar",
             parent=None,
-            min_range=0.10,
-            max_range=1.0,     
+            min_range=0.15,
+            max_range=1.5,     
             draw_points=False,
             draw_lines=True,
             horizontal_fov=360.0,
@@ -123,30 +142,37 @@ class JetbotTask(RLTask):
                                                      self._sim_config.parse_actor_config("target"))
         target.set_collision_enabled(False)
         
-        
 
 
     def add_obstacle(self):
-        radius = 0.1
-        color = torch.tensor([1, 0, 0])
-        obstacle = DynamicSphere(
-            prim_path=self.default_zero_env_path + "/Obstacle/obstacle",
-            translation=self.obstacle_position,
-            name="obstacle",
-            radius=radius,
-            color=color)
-        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obstacle.prim_path),
-                                                     self._sim_config.parse_actor_config("obstacle"))
-        obstacle.set_collision_enabled(True)
+        cubePrim = omni.physx.scripts.physicsUtils.add_cube(self._stage, self.default_zero_env_path + "/Obstacle/obstacle", self.obstacle_size, self.obstacle_pose,  color = self.obstacle_color)
+        SetRigidBodyCommand.execute(cubePrim.GetPath(), "", False)
+
+        # cubePrim1 = omni.physx.scripts.physicsUtils.add_cube(self._stage, self.default_zero_env_path + "/Obstacle1/obstacle1", self.obstacle_size, self.obstacle1_pose, self.obstacle_ori, color = self.obstacle_color)
+        # SetRigidBodyCommand.execute(cubePrim1.GetPath(), "", False)
+
+        # cubePrim2 = omni.physx.scripts.physicsUtils.add_cube(self._stage, self.default_zero_env_path + "/Obstacle2/obstacle2", self.obstacle_size, self.obstacle2_pose, self.obstacle_ori, color = self.obstacle_color)
+        # SetRigidBodyCommand.execute(cubePrim2.GetPath(), "", False)
+        # self.set_obstacle_properties(self._stage, cubePrim.GetPath(),-2, 2, 0)
+
+
+    def set_obstacle_properties(self, stage, prim, x_v, y_v, z_a):
+        rb = UsdPhysics.RigidBodyAPI.Get(stage, prim)
+        rb.CreateKinematicEnabledAttr(False)
+        vel1 = Gf.Vec3f(x_v,y_v,0)
+        vel2 = Gf.Vec3f(0,0,z_a)
+        rb.GetVelocityAttr().Set(vel1)
+        rb.GetAngularVelocityAttr().Set(vel2)
 
     def get_home(self):
         current_working_dir = Path.cwd()
         asset_path = str(current_working_dir.parent) + "/assets/jetbot"
 
         add_reference_to_stage(
-            usd_path=asset_path + "/obstacles.usd",
+            usd_path=asset_path + "/obstacles4.usd",
             prim_path= self.default_zero_env_path + "/Home/home"
         )
+
 
 
     def get_observations(self) -> dict:
@@ -184,7 +210,7 @@ class JetbotTask(RLTask):
         obs = torch.hstack((self.ranges, self.headings.unsqueeze(1), self.goal_distances.unsqueeze(1)))
         self.obs_buf[:] = obs
 
-
+        
         observations = {
             self._jetbots.name: {
                 "obs_buf": self.obs_buf
@@ -194,6 +220,8 @@ class JetbotTask(RLTask):
 
     def pre_physics_step(self, actions) -> None:
         """Perform actions to move the robot."""
+        if not self._env._world.is_playing():
+            return
 
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:
@@ -203,49 +231,67 @@ class JetbotTask(RLTask):
         indices = torch.arange(self._jetbots.count, dtype=torch.int32, device=self._device)
         
         controls = torch.zeros((self._num_envs, 2))
+        # obstacle_paths = self._obstacles.prim_paths
+        # obstacle1_paths = self._obstacles1.prim_paths
+        # obstacle2_paths = self._obstacles2.prim_paths
+
         for i in range(self._num_envs):
             controls[i] = self._diff_controller.forward([actions[i][0].item(), actions[i][1].item()])
-
+            # self.set_obstacle_properties(self._stage, obstacle_paths[i], 0, 0.45, 0) 
+            # self.set_obstacle_properties(self._stage, obstacle1_paths[i], 0.25, -0.25, 0)
+            # self.set_obstacle_properties(self._stage, obstacle2_paths[i], self.x_vel, -self.y_vel, self.z_ang+5)   
+        
         self._jetbots.set_joint_velocity_targets(controls, indices=indices)
+
+
+
+
 
     def reset_idx(self, env_ids):
         # """Resetting the environment at the beginning of episode."""
-        # num_resets = len(env_ids)
 
-        # self.goal_reached = torch.zeros(self._num_envs, device=self._device)
-        # self.collisions = torch.zeros(self._num_envs, device=self._device)
-
-        # # apply resets
-
-        # root_pos = self.initial_root_pos.clone()
-        # root_pos[env_ids, 0] += torch_rand_float(-1.5, 1.5, (num_resets, 1), device=self._device).view(-1)
-        # root_pos[env_ids, 1] += torch_rand_float(-1.5, 1.5, (num_resets, 1), device=self._device).view(-1)
-        # root_pos[env_ids, 2] = 0
-
-        # root_vel = torch.zeros((num_resets, 6), device=self._device)
-        # self._jetbots.set_world_poses(root_pos[env_ids], self.initial_root_rot[env_ids].clone(), indices=env_ids)
-        # self._jetbots.set_velocities(root_vel, indices=env_ids)
-
-        # self.reset_buf[env_ids] = 0
-        # self.progress_buf[env_ids] = 0
         """Resetting the environment at the beginning of episode."""
         num_resets = len(env_ids)
 
         self.goal_reached = torch.zeros(self._num_envs, device=self._device)
         self.collisions = torch.zeros(self._num_envs, device=self._device)
 
+
+        #randomize initial jet_pose
+        current_working_dir = Path.cwd()
+        occupancy_path = str(current_working_dir) + "/cost4_0.5.png"
+        binary_array = (cv2.imread(occupancy_path, cv2.IMREAD_GRAYSCALE) > 128).astype(np.uint8)
+        indices_of_ones = np.argwhere(binary_array == 1)
+        self.selected_index = tuple(indices_of_ones[np.random.choice(len(indices_of_ones))])
+        center = np.array(binary_array.shape) // 2
+        self.final_index = (self.selected_index - center)/2
+        self.rand_pose = torch.zeros(3)
+        self.rand_pose[0],self.rand_pose[1],self.rand_pose[2] = self.final_index[0], self.final_index[1],0
+        # print(f"random--------------->>{self.rand_pose}")
+
         # apply resets
         root_pos, root_rot = self.initial_root_pos[env_ids], self.initial_root_rot[env_ids]
         root_vel = torch.zeros((num_resets, 6), device=self._device)
-        self._jetbots.set_world_poses(root_pos, root_rot, indices=env_ids)
+        # print(f"shape----------.{np.shape(self.rand_pose)}")
+        self._jetbots.set_world_poses(root_pos+self.rand_pose, root_rot, indices=env_ids)
         self._jetbots.set_velocities(root_vel, indices=env_ids)
 
         target_pos = self.initial_target_pos[env_ids] 
-        
+        # print(env_ids)
         self._targets.set_world_poses(target_pos, indices=env_ids)
 
+
+        # obstacle_pos = self.initial_obstacle_pos[env_ids] 
+        # self._obstacles.set_world_poses(obstacle_pos, indices=env_ids)
+
+        # obstacle1_pos = self.initial_obstacle1_pos[env_ids] 
+        # self._obstacles1.set_world_poses(obstacle1_pos, indices=env_ids)
+
+        # obstacle2_pos = self.initial_obstacle2_pos[env_ids] 
+        # self._obstacles2.set_world_poses(obstacle2_pos, indices=env_ids)
+
         to_target = target_pos - self.initial_root_pos[env_ids]
-        to_target[:, 2] = 0.0
+  
         self.prev_potentials[env_ids] = -torch.norm(to_target, p=2, dim=-1) / self.dt
         self.potentials[env_ids] = self.prev_potentials[env_ids].clone()
 
@@ -260,9 +306,28 @@ class JetbotTask(RLTask):
         jetbot_paths = self._jetbots.prim_paths
         self._lidarpaths = [path + "/chassis/Lidar/Lidar" for path in jetbot_paths]
 
+        # #randomize initial jet_pose
+        # current_working_dir = Path.cwd()
+        # occupancy_path = str(current_working_dir) + "/cost4_0.5.png"
+        # binary_array = (cv2.imread(occupancy_path, cv2.IMREAD_GRAYSCALE) > 128).astype(np.uint8)
+        # indices_of_ones = np.argwhere(binary_array == 1)
+        # self.selected_index = tuple(indices_of_ones[np.random.choice(len(indices_of_ones))])
+        # center = np.array(binary_array.shape) // 2
+        # self.final_index = (self.selected_index - center)/2
+        # print(f"random--------------->>{self.final_index}")
+
         # get some initial poses
         self.initial_root_pos, self.initial_root_rot = self._jetbots.get_world_poses()
+        # self.initial_root_pos = ((torch.rand(64, 3) * 2) - 1) - self.initial_root_pos0
+        # self.initial_root_pos[:,0] = self.initial_root_pos[:,0] + self.final_index[0]
+        # self.initial_root_pos[:,1] = self.initial_root_pos[:,1] + self.final_index[1]
+        # self.initial_root_pos[:,2] = 0
         self.initial_target_pos, _ = self._targets.get_world_poses()
+        # self.initial_obstacle_pos, _ = self._obstacles.get_world_poses()
+
+        # self.initial_obstacle1_pos, _ = self._obstacles1.get_world_poses()
+        # self.initial_obstacle2_pos, _ = self._obstacles2.get_world_poses()
+
 
         self.dt = 1.0 / 60.0
         self.potentials = torch.tensor([-1000.0 / self.dt], dtype=torch.float32, device=self._device).repeat(self.num_envs)
@@ -297,11 +362,13 @@ class JetbotTask(RLTask):
         progress_reward = self.potentials - self.prev_potentials
 
         episode_end = torch.where(self.progress_buf >= self._max_episode_length - 1, 1.0, 0.0)
+        speed = torch.where(self.goal_reached.bool(),self._max_episode_length - self.progress_buf,0)
 
-        rewards -= 20 * self.collisions
+        rewards -= 30 * self.collisions
         rewards -= 20 * episode_end
-        rewards += closer_to_goal * 0.01
-        rewards += closer_to_heading * 0.01
+        rewards += speed * 0.01
+        rewards += closer_to_goal * 0.1
+        rewards += closer_to_heading * 0.1
         #rewards += heading_bonus * 0.005
         rewards += 0.1 * progress_reward
         rewards += 20 * self.goal_reached

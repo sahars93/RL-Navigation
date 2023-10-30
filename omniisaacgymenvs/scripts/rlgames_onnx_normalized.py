@@ -117,7 +117,7 @@ class RLGTrainer():
             flattened_outputs = traced(*adapter.flattened_inputs)
             print(flattened_outputs)
         
-        export_file = "onnx_models/jetbot_2.onnx"
+        export_file = "onnx_models/final360.onnx"
 
         torch.onnx.export(traced, *adapter.flattened_inputs, export_file, verbose=True, input_names=['obs'], output_names=['mu', 'log_std', 'value'])
 
