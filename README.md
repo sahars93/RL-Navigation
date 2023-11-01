@@ -49,7 +49,7 @@ cd ~/catkin_ws/src/
 git clone https://github.com/ROBOTIS-GIT/turtlebot3_simulations.git
 cd ~/catkin_ws && catkin_make
 ```
-Change the number of 2d lidar samples (to 21) and the min range (to 0.1) and the max range (to 1.0):
+Change the min range (to 0.15) and the max range (to 1.5):
 
 ```bash
 sudo nano /opt/ros/noetic/share/turtlebot3_description/urdf/turtlebot3_waffle.gazebo.xacro
@@ -59,7 +59,7 @@ Launch the TurtleBot3 World
 
 
 ```bash
-export TURTLEBOT3_MODEL=burger
+export TURTLEBOT3_MODEL=waffle
 roslaunch turtlebot3_gazebo turtlebot3_world.launch
 ```
 
