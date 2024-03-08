@@ -81,22 +81,31 @@ class JetbotTask(RLTask):
         self.prev_jetbot_positions = torch.zeros(self._num_envs,3).to(self._device)
         self.target_position = torch.tensor([3.5, -2.5, 0.0]).to(self._device)
 
-        ## Training in static envs : use_flatcache = True (in task yaml file)
+        ## IF dynamic cubes are not moving, set "use_flatcache" parameter in task yaml file to False
+        ## but training in static envs : use_flatcache = True
         
+        self.obstacle1_pose = torch.tensor([1.7, 1.6, 0.0]).to(self._device)
+        self.obstacle2_pose = torch.tensor([0.0, 2.2, 0.0]).to(self._device)
         return
 
     def set_up_scene(self, scene) -> None:
         self._stage = omni.usd.get_context().get_stage()
         self.get_jetbot()
         self.add_target()
+        self.add_obstacle1()
+        self.add_obstacle2()
         self.get_home()
         RLTask.set_up_scene(self, scene)
         self._home = ArticulationView(prim_paths_expr="/World/envs/.*/Home/home", name="home_view")
         self._jetbots = ArticulationView(prim_paths_expr="/World/envs/.*/Jetbot/jetbot", name="jetbot_view")
         self._targets = RigidPrimView(prim_paths_expr="/World/envs/.*/Target/target", name="targets_view")
+        self._obstacles1 = RigidPrimView(prim_paths_expr="/World/envs/.*/Obstacle1/obstacle1", name="obstacles_view")
+        self._obstacles2 = RigidPrimView(prim_paths_expr="/World/envs/.*/Obstacle2/obstacle2", name="obstacles2_view")
         self._targets._non_root_link = True
         scene.add(self._jetbots)
         scene.add(self._targets)
+        scene.add(self._obstacles1)
+        scene.add(self._obstacles2)
 
         return
 
@@ -135,6 +144,39 @@ class JetbotTask(RLTask):
         target.set_collision_enabled(False)
         
 
+    def add_obstacle1(self):
+        obstacle = DynamicCuboid(prim_path=self.default_zero_env_path + "/Obstacle1/obstacle1",
+            name="obstacle1",
+            position=self.obstacle1_pose,
+            scale=np.array([.25, .7, .2]),
+            color=np.array([1, 0, 0]))
+        
+        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obstacle.prim_path),
+                                                     self._sim_config.parse_actor_config("obstacle"))
+        obstacle.set_collision_enabled(True)
+
+
+    def add_obstacle2(self):
+        obstacle = DynamicCuboid(prim_path=self.default_zero_env_path + "/Obstacle2/obstacle2",
+            name="obstacle2",
+            position=self.obstacle2_pose,
+            scale=np.array([.25, .7, .2]),
+            color=np.array([1, 0, 0]))
+        
+        self._sim_config.apply_articulation_settings("obstacle", get_prim_at_path(obstacle.prim_path),
+                                                     self._sim_config.parse_actor_config("obstacle"))
+        obstacle.set_collision_enabled(True) 
+
+
+
+    def set_obstacle_properties(self, stage, prim, x_v, y_v, z_a):
+        rb = UsdPhysics.RigidBodyAPI.Get(stage, prim)
+        if rb:
+            vel1 = Gf.Vec3f(x_v,y_v,0)
+            vel2 = Gf.Vec3f(0,0,z_a)
+            rb.GetVelocityAttr().Set(vel1)
+            rb.GetAngularVelocityAttr().Set(vel2)
+
     def get_home(self):
         current_working_dir = Path.cwd()
         asset_path = str(current_working_dir.parent) + "/assets/jetbot"
@@ -170,6 +212,19 @@ class JetbotTask(RLTask):
 
         self.headings = goal_angles - self.yaws
 
+
+
+        self.obstacle1_pos, _ = self._obstacles1.get_world_poses()
+        self.obstacle2_pos, _ = self._obstacles2.get_world_poses()
+        dynamic_distance1 = torch.atan2(self.obstacle1_pos[:,1] - self.prev_dyn_obstacle1_pos[:,1], self.obstacle1_pos[:,0] - self.prev_dyn_obstacle1_pos[:,0])
+        dynamic_distance2 = torch.atan2(self.obstacle2_pos[:,1] - self.prev_dyn_obstacle2_pos[:,1], self.obstacle2_pos[:,0] - self.prev_dyn_obstacle2_pos[:,0])
+
+        self.prev_dyn_obstacle1_pos = self.obstacle1_pos
+        self.prev_dyn_obstacle2_pos = self.obstacle2_pos
+
+        self.direction1 = torch.where(torch.abs(dynamic_distance1)  > 0.0001, self.direction1, self.direction1*-1)
+        self.direction2 = torch.where(torch.abs(dynamic_distance2)  > 0.000001, self.direction2, self.direction2*-1)
+        
         self.headings = torch.where(self.headings > math.pi, self.headings - 2 * math.pi, self.headings)
         self.headings = torch.where(self.headings < -math.pi, self.headings + 2 * math.pi, self.headings)        
         self.goal_distances = torch.linalg.norm(self.positions - self.target_positions, dim=1).to(self._device)
@@ -209,9 +264,15 @@ class JetbotTask(RLTask):
         indices = torch.arange(self._jetbots.count, dtype=torch.int32, device=self._device)
         
         controls = torch.zeros((self._num_envs, 2))
-
+        obstacle1_paths = self._obstacles1.prim_paths
+        obstacle2_paths = self._obstacles2.prim_paths
         for i in range(self._num_envs):
             controls[i] = self._diff_controller.forward([actions[i][0].item(), actions[i][1].item()])
+            self.set_obstacle_properties(self._stage, obstacle1_paths[i], 0, float(self.direction1[i].item())*(-0.8), 0) 
+            self.set_obstacle_properties(self._stage, obstacle2_paths[i], 0, float(self.direction2[i].item())*-1*(0.8), 0)
+
+            # self.set_obstacle_properties(self._stage, obstacle1_paths[i], 0, float(self.direction1[i].item())*i*0.015, 0) # different speed for dynamic object
+
 
         self._jetbots.set_joint_velocity_targets(controls, indices=indices)
 
@@ -263,6 +324,13 @@ class JetbotTask(RLTask):
         target_pos = self.initial_target_pos[env_ids] 
 
 
+        obstacle1_pos = self.initial_obstacle1_pos[env_ids] 
+        self._obstacles1.set_world_poses(obstacle1_pos, indices=env_ids)
+
+        obstacle2_pos = self.initial_obstacle2_pos[env_ids] 
+        self._obstacles2.set_world_poses(obstacle2_pos, indices=env_ids)
+
+
         self._targets.set_world_poses(target_pos, indices=env_ids)
         to_target = target_pos - self.initial_root_pos[env_ids]
   
@@ -284,6 +352,9 @@ class JetbotTask(RLTask):
         # get some initial poses
         self.initial_root_pos, self.initial_root_rot = self._jetbots.get_world_poses()
         self.initial_target_pos, _ = self._targets.get_world_poses()
+        self.initial_obstacle1_pos, _ = self._obstacles1.get_world_poses()
+        self.initial_obstacle2_pos, _ = self._obstacles2.get_world_poses()
+
 
         self.dt = 1.0 / 60.0
         self.potentials = torch.tensor([-1000.0 / self.dt], dtype=torch.float32, device=self._device).repeat(self.num_envs)
