@@ -80,14 +80,7 @@ class JetbotNode:
         
 
     def send_control(self, timer_event):
-        # print(self.base_control)
-        
-        # print(f"robot's pose: {self.base_position}")
-        # print(f"target's pose: {self.target_pos}")
-        # print(f"dis: {self.goal_distances}")
-        # print(f"angle: {self.headings}")
-        # print(f"range: {self.ranges}")
-        
+
         range = np.array(self.ranges, dtype=np.float32)
         range = np.roll(range, int(len(self.ranges)/2))
         dist = np.array([self.goal_distances])

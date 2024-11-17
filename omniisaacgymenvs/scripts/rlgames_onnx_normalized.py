@@ -132,85 +132,29 @@ class RLGTrainer():
             None,
             {"obs": np.zeros((1,)+agent.obs_shape).astype(np.float32)},
         )
-        #print(outputs)
-        #action = np.argmax(outputs[0])
-        #print(action)
-
-        #input()
 
         is_done = False
         env = agent.env
         obs = env.reset()
-        #obs, reward, done, info = env.step(torch.tensor([[0.0]]))
-        #print(obs)
 
         obs = env.reset()
-        #obs, reward, done, info = env.step(torch.tensor([[0.0]]))
-        #print(obs)
-        
-        #input()
-        #input()
-        #prev_screen = env.render(mode='rgb_array')
-        #plt.imshow(prev_screen)
         total_reward = 0
         num_steps = 0
         while not is_done:
 
             
             outputs = ort_model.run(None, {"obs": obs["obs"].cpu().numpy()},)
-            #print("outputs[0]", outputs[0])
             mu = outputs[0] #.squeeze(0)
             sigma = np.exp(outputs[1]) #.squeeze(0))
-            #action = np.random.normal(mu, sigma)
             action = mu
             action = np.clip(action, -1.0, 1.0)
             action = torch.tensor(action)
-            #action = torch.tensor(mu)
-            #print(mu, sigma, action)
-            #print(action)
-            #print(obs)
-            #self.polar_to_cartesian_coordinate(obs["obs"].cpu().numpy().squeeze()[:36], -np.pi, 0)
-            #input()
-            # print("***********************************************************")
-            # print(obs["obs"].device)
             obs, reward, done, info = env.step(action.to(obs["obs"].device))
             total_reward += reward
             num_steps += 1
             is_done = done[0]
-            #print("onnx,obs", obs)
-            #screen = env.render(mode='rgb_array')
-            #plt.imshow(screen)
-            #display.display(plt.gcf())
-            #display.clear_output(wait=True)
-        print(total_reward, num_steps)
-        #ipythondisplay.clear_output(wait=True)
 
-        # runner.run({
-        #     'train': not self.cfg.test,
-        #     'play': self.cfg.test,
-        #     'checkpoint': self.cfg.checkpoint,
-        #     'sigma': None
-        # })
-    
-    # def polar_to_cartesian_coordinate(self, ranges, angle_min, angle_max):
-    #     angle_step = (angle_max - angle_min) / len(ranges)
-    #     angle = 180
-    #     points = []
-    #     for range in ranges:
-    #         x = range * np.cos(angle)
-    #         y = range * np.sin(angle)
-    #         angle += angle_step
-    #         points.append([x,y])
 
-    #     points_np = np.array(points)
-    #     #print(points_np)
-    #     plt.figure()
-    #     colors = np.linspace(0, 1, 36)
-    #     sizes = np.linspace(1, 20, 36)
-    #     plt.scatter(points_np[:,0], points_np[:,1], c=colors, s=sizes)
-    #     plt.show()
-    
-    #     return points
 
 
 @hydra.main(config_name="config", config_path="../cfg")

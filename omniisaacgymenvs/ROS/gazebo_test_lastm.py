@@ -2,7 +2,6 @@ import rospy
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PointStamped
-from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 import onnxruntime as ort
 import numpy as np
@@ -23,8 +22,6 @@ class JetbotNode:
         self.ort_model = ort.InferenceSession("onnx_models/final360.onnx")
         self.base_control = True
         self.lidar_samples = 360
-        
-        self.pose_cb = rospy.Subscriber('/move_base_simple/goal', PoseStamped, self.pose_callback)
 
         # self.target_pos = np.array([-0.5, -1.8, 0.0])
         self.target_pos = np.array([0.5, 0.5, 0.0])
@@ -35,19 +32,14 @@ class JetbotNode:
 
 
         self.base_position = None
-        self.base_yaw = None        
+        self.base_yaw = None 
+        self.hidden_state = np.zeros((1,1, 64), dtype=np.float32)  # 64: num_units for lstm
+        self.cell_state = np.zeros((1,1, 64), dtype=np.float32)       
 
 
         rospy.Timer(rospy.Duration(1/5.0), self.send_control)
         rospy.Timer(rospy.Duration(1/5.0), self.update_base_pose)
     
-    def pose_callback(self, msg):
-        self.target_pos[0] = msg.pose.position.x
-        self.target_pos[1] = msg.pose.position.y
-        self.target_pos[2] = msg.pose.position.z
-        print("target pose updated!")
-        print(self.target_pos)
-        self.base_control = True
     
     def publish_target(self):
         target = PointStamped()
@@ -90,19 +82,7 @@ class JetbotNode:
         
 
     def send_control(self, timer_event):
-        # print(self.base_control)
-        
-        # print(f"robot's pose: {self.base_position}")
-        # print(f"target's pose: {self.target_pos}")
-        # print(f"dis: {self.goal_distances}")
-        # print(f"angle: {self.headings}")
-        # print(f"range: {self.ranges}")
-        
-        # print(f" --> robot's pose: {self.base_position}")
-        # print(f"  -> target's pose: {self.target_pos}")
-        # print(f" --> dis: {self.goal_distances}")
-        # print(f"  -> angle: {self.headings}")
-        
+
         range = np.array(self.ranges, dtype=np.float32)
         range = np.roll(range, int(len(self.ranges)/2))
         dist = np.array([self.goal_distances])
@@ -111,16 +91,17 @@ class JetbotNode:
         observation = np.concatenate((range, angle, dist)).astype(np.float32)
         observation = observation.reshape((1,-1))
         observation[observation == inf] = 1.5
-        outputs = self.ort_model.run(None, {"obs": observation})
+        outputs = self.ort_model.run(None, {"obs": observation,"out_state.1" : self.hidden_state, "hidden_state.1" : self.cell_state},)
+        self.hidden_state = outputs[3]  
+        self.cell_state = outputs[4]
         mu = outputs[0].squeeze()
-        # print(f"value : {outputs[2]}")
         action = np.clip(mu, -1.0, 1.0)
         base_action = action[:2]
     
         # publish base actions as twist message, base_action[0] is the linear velocity, base_action[1] is the angular velocity
         twist = Twist()
-        twist.linear.x = abs(base_action[0])* 0.1 # check the speeds, 0.2 is safe
-        twist.angular.z = base_action[1]* 0.25   # check the speeds, 0.1 is safe
+        twist.linear.x = abs(base_action[0])* 0.05 # check the speeds, 0.2 is safe
+        twist.angular.z = base_action[1]* 0.15   # check the speeds, 0.1 is safe
         if self.base_control:
             self.base_cmd_vel_pub.publish(twist)
         else:
