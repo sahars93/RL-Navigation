@@ -107,4 +107,4 @@ Note that there are several parameters that need to be set correctly:
     self.max_range = 2.5 
     self.min_range = 0.20 
 
-![Real World test with Turtlebot 4 Lite](img/realworld.png)
+![Real World test with Turtlebot 4 Lite](omniisaacgymenvs/img/realworld.png)
