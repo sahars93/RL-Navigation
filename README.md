@@ -99,13 +99,13 @@ Note that there are several parameters that need to be set correctly:
 - if the model uses lstm, set the parameter to True.
     ```python
     self.lstm = True
-    self.lstm_hidden_size = 128
+    self.lstm_hidden_size = 64
     ```
 - define the lidar settings, and adjust the lidar position according to the train robot.:
     ```python
     self.lidar_samples = 120
-    self.max_range = 2.5 
-    self.min_range = 0.20 
+    self.max_range = 1.5 
+    self.min_range = 0.15 
 
 ## RealWorld results with Turtlebot 4 Lite
 
