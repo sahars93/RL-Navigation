@@ -82,6 +82,7 @@ Testing with LSTM model:
 ```bash
 python3 ROS/gazebo_test_lstm.py
 ```
+![Gazebo test with Turtlebot](omniisaacgymenvs/img/gazebo.gif)
 
 ## Test in RealWorld
 
@@ -109,6 +110,6 @@ Note that there are several parameters that need to be set correctly:
 
 ## RealWorld results with Turtlebot 4 Lite
 
-![Real World test with Turtlebot 4 Lite](omniisaacgymenvs/img/realworld.gif)
+![Real World test with Turtlebot 4 Lite](omniisaacgymenvs/img/RL_Nav_x2.gif)
 
 ![Real World test with Turtlebot 4 Lite](omniisaacgymenvs/img/realworld.png)
