@@ -82,7 +82,7 @@ Testing with LSTM model:
 ```bash
 python3 ROS/gazebo_test_lstm.py
 ```
-![Gazebo test with Turtlebot](omniisaacgymenvs/img/gazebo.gif)
+![Gazebo test with Turtlebot](omniisaacgymenvs/img/gazebo2.gif)
 
 ## Test in RealWorld
 
