@@ -82,8 +82,9 @@ Testing with LSTM model:
 ```bash
 python3 ROS/gazebo_test_lstm.py
 ```
-![Gazebo test with Turtlebot](omniisaacgymenvs/img/gazebo2.gif)
-
+<div align="center">
+  <img src="omniisaacgymenvs/img/gazebo2.gif" alt="Gazebo test with Turtlebot">
+</div>
 ## Test in RealWorld
 
 To test it with a real robot, one only needs to run the following node: 
