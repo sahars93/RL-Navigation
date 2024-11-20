@@ -83,7 +83,7 @@ Testing with LSTM model:
 python3 ROS/gazebo_test_lstm.py
 ```
 <div align="center">
-  <img src="omniisaacgymenvs/img/gazebo2.gif" alt="Gazebo test with Turtlebot">
+  <img src="omniisaacgymenvs/img/gazebo_gif3.gif" alt="Gazebo test with Turtlebot">
 </div>
 ## Test in RealWorld
 
