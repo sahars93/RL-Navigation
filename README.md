@@ -115,3 +115,12 @@ Note that there are several parameters that need to be set correctly:
 ![Real World test with Turtlebot 4 Lite](omniisaacgymenvs/img/RL_Nav_x2.gif)
 
 ![Real World test with Turtlebot 4 Lite](omniisaacgymenvs/img/realworld.png)
+
+
+## References
+
+If you use this work in your research, please cite the following paper:
+
+**Sim-to-Real Transfer for Mobile Robots with Reinforcement Learning: from NVIDIA Isaac Sim to Gazebo and Real ROS 2 Robots**  
+[Link to paper](https://arxiv.org/pdf/2501.02902)
+
